@@ -1,4 +1,4 @@
-### Note: Certain parts of this fork were written with the help of AI and were made purely for private use. However, you are more than welcome to see how the code works or to merge the changes in this fork into your project.
+### Note: Certain parts of this fork were written with the help of AI and were made purely for private use. However, you are more than welcome to see how the code works or to merge the changes in this fork into your project. (all of these are also WIP and is unstable yet)
 
 
 - **Changes:** implemented an optimized LOD network pipeline and helpers (`CompressionUtil`, `DeltaFilter`, `ChunkSendQueue`, `OptimizedLODData`) and wired them into `NetworkHandler` and the client receiver (`NetworkClientHandler`).

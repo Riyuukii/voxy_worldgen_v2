@@ -1,6 +1,8 @@
 package com.ethan.voxyworldgenv2.core;
 
 import com.ethan.voxyworldgenv2.network.NetworkHandler;
+import com.ethan.voxyworldgenv2.core.PlayerTracker;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -24,7 +26,7 @@ public class ChunkUpdateTracker {
 
     public void markDirty(LevelChunk chunk) {
         dirtyChunks.computeIfAbsent(chunk.getLevel().dimension(), k -> ConcurrentHashMap.newKeySet())
-                .add(chunk.getPos().toLong());
+                .add(chunk.getPos().pack());
     }
 
     public void processDirty(ServerLevel level) {
@@ -42,9 +44,17 @@ public class ChunkUpdateTracker {
         Set<Long> toProcess = new java.util.HashSet<>(levelDirty);
         
         for (long posLong : toProcess) {
-            ChunkPos pos = new ChunkPos(posLong);
-            LevelChunk chunk = level.getChunkSource().getChunk(pos.x, pos.z, false);
+            ChunkPos pos = ChunkPos.unpack(posLong);
+            LevelChunk chunk = level.getChunkSource().getChunk(pos.x(), pos.z(), false);
             if (chunk != null) {
+                // mark as unsynced for players in this level so they will receive updates
+                for (ServerPlayer player : PlayerTracker.getInstance().getPlayers()) {
+                    if (player.level() == level) {
+                        var synced = PlayerTracker.getInstance().getSyncedChunks(player.getUUID());
+                        if (synced != null) synced.remove(pos.pack());
+                    }
+                }
+
                 NetworkHandler.broadcastLODData(chunk);
             }
         }

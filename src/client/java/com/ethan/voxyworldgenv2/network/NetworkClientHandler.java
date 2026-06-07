@@ -28,6 +28,11 @@ public class NetworkClientHandler {
                 handleLODData(payload);
             });
         });
+        ClientPlayNetworking.registerGlobalReceiver(NetworkHandler.LODDataV2Payload.TYPE, (payload, context) -> {
+            context.client().execute(() -> {
+                handleLODDataV2(payload);
+            });
+        });
     }
 
     @SuppressWarnings("unchecked")
@@ -73,8 +78,57 @@ public class NetworkClientHandler {
                 DataLayer bl = sectionData.blockLight() != null ? new DataLayer(sectionData.blockLight()) : null;
                 DataLayer sl = sectionData.skyLight() != null ? new DataLayer(sectionData.skyLight()) : null;
                 
-                VoxyIntegration.rawIngest(level, section, payload.pos().x, sectionData.y(), payload.pos().z, bl, sl);
+                VoxyIntegration.rawIngest(level, section, payload.pos().x(), sectionData.y(), payload.pos().z(), bl, sl);
                 
+            } catch (Exception e) {
+                VoxyWorldGenV2.LOGGER.error("failed to handle LOD data for chunk " + payload.pos(), e);
+            } finally {
+                statesRaw.release();
+                biomesRaw.release();
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void handleLODDataV2(NetworkHandler.LODDataV2Payload payload) {
+        ClientLevel level = Minecraft.getInstance().level;
+        if (level == null) return;
+
+        if (!level.dimension().equals(payload.dimension())) return;
+
+        long bytes = 0;
+        for (NetworkHandler.LODDataV2Payload.SectionDataV2 sd : payload.sections()) {
+            bytes += sd.states().length;
+            bytes += sd.biomes().length;
+            if (sd.blockLight() != null) bytes += sd.blockLight().length;
+            if (sd.skyLight() != null) bytes += sd.skyLight().length;
+        }
+        NetworkState.incrementReceived(bytes);
+
+        for (NetworkHandler.LODDataV2Payload.SectionDataV2 sectionData : payload.sections()) {
+            io.netty.buffer.ByteBuf statesRaw = io.netty.buffer.Unpooled.wrappedBuffer(sectionData.states());
+            io.netty.buffer.ByteBuf biomesRaw = io.netty.buffer.Unpooled.wrappedBuffer(sectionData.biomes());
+            try {
+                PalettedContainerFactory factory = PalettedContainerFactory.create(level.registryAccess());
+                LevelChunkSection section = new LevelChunkSection(factory);
+
+                net.minecraft.network.RegistryFriendlyByteBuf statesBuf = new net.minecraft.network.RegistryFriendlyByteBuf(
+                    new net.minecraft.network.FriendlyByteBuf(statesRaw),
+                    level.registryAccess()
+                );
+                ((PalettedContainer<BlockState>) section.getStates()).read(statesBuf);
+
+                net.minecraft.network.RegistryFriendlyByteBuf biomesBuf = new net.minecraft.network.RegistryFriendlyByteBuf(
+                    new net.minecraft.network.FriendlyByteBuf(biomesRaw),
+                    level.registryAccess()
+                );
+                ((PalettedContainer<Holder<Biome>>) section.getBiomes()).read(biomesBuf);
+
+                DataLayer bl = sectionData.blockLight() != null ? new DataLayer(sectionData.blockLight()) : null;
+                DataLayer sl = sectionData.skyLight() != null ? new DataLayer(sectionData.skyLight()) : null;
+
+                VoxyIntegration.rawIngest(level, section, payload.pos().x(), sectionData.y(), payload.pos().z(), bl, sl);
+
             } catch (Exception e) {
                 VoxyWorldGenV2.LOGGER.error("failed to handle LOD data for chunk " + payload.pos(), e);
             } finally {

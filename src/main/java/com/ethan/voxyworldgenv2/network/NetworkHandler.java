@@ -22,13 +22,25 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 
 import java.util.ArrayList;
 import java.util.List;
+import io.netty.buffer.Unpooled;
+import net.minecraft.network.FriendlyByteBuf;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.zip.Deflater;
+import java.util.zip.DeflaterOutputStream;
+import java.util.zip.InflaterInputStream;
 
 public class NetworkHandler {
     public static final Identifier HANDSHAKE_ID = Identifier.parse(VoxyWorldGenV2.MOD_ID + ":handshake");
     public static final Identifier LOD_DATA_ID = Identifier.parse(VoxyWorldGenV2.MOD_ID + ":lod_data");
+    public static final Identifier LOD_DATA_V2_ID = Identifier.parse(VoxyWorldGenV2.MOD_ID + ":lod_data_v2");
+    public static final Identifier CLIENT_FEATURES_ID = Identifier.parse(VoxyWorldGenV2.MOD_ID + ":client_features");
 
     // keep individual packets well under Netty's 2MB limit to prevent connection resets on public servers
     private static final int MAX_PACKET_BYTES = 32_768;
+    // do not attempt compression on arrays smaller than this (saves CPU)
+    private static final int COMPRESS_MIN_SIZE = 512;
 
     public record HandshakePayload(boolean serverHasMod) implements CustomPacketPayload {
         public static final Type<HandshakePayload> TYPE = new Type<>(HANDSHAKE_ID);
@@ -95,22 +107,136 @@ public class NetworkHandler {
         }
     }
 
+    // V2 payload: supports per-array compression to save bandwidth when both sides support it
+    public record LODDataV2Payload(ResourceKey<Level> dimension, ChunkPos pos, int minY, List<SectionDataV2> sections) implements CustomPacketPayload {
+        public static final Type<LODDataV2Payload> TYPE = new Type<>(LOD_DATA_V2_ID);
+        public static final StreamCodec<RegistryFriendlyByteBuf, LODDataV2Payload> CODEC = CustomPacketPayload.codec(LODDataV2Payload::write, LODDataV2Payload::new);
+
+        public record SectionDataV2(int y, byte[] states, byte[] biomes, byte[] blockLight, byte[] skyLight) {
+            public void write(RegistryFriendlyByteBuf buf) {
+                buf.writeInt(y);
+                writeCompressedFlaggedBytes(buf, states);
+                writeCompressedFlaggedBytes(buf, biomes);
+                buf.writeNullable(blockLight, (b, a) -> writeCompressedFlaggedBytes((RegistryFriendlyByteBuf) b, a));
+                buf.writeNullable(skyLight, (b, a) -> writeCompressedFlaggedBytes((RegistryFriendlyByteBuf) b, a));
+            }
+
+            public static SectionDataV2 read(RegistryFriendlyByteBuf buf) {
+                return new SectionDataV2(
+                    buf.readInt(),
+                    readCompressedFlaggedBytes(buf),
+                    readCompressedFlaggedBytes(buf),
+                    buf.readNullable(b -> readCompressedFlaggedBytes((RegistryFriendlyByteBuf) b)),
+                    buf.readNullable(b -> readCompressedFlaggedBytes((RegistryFriendlyByteBuf) b))
+                );
+            }
+        }
+
+        public LODDataV2Payload(RegistryFriendlyByteBuf buf) {
+            this(
+                ResourceKey.create(Registries.DIMENSION, Identifier.parse(buf.readUtf())),
+                buf.readChunkPos(),
+                buf.readInt(),
+                buf.readCollection(ArrayList::new, b -> SectionDataV2.read((RegistryFriendlyByteBuf) b))
+            );
+        }
+
+        public void write(RegistryFriendlyByteBuf buf) {
+            buf.writeUtf(dimension.identifier().toString());
+            buf.writeChunkPos(pos);
+            buf.writeInt(minY);
+            buf.writeCollection(sections, (b, s) -> s.write((RegistryFriendlyByteBuf) b));
+        }
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
     public static void init() {
-        PayloadTypeRegistry.playC2S().register(HandshakePayload.TYPE, HandshakePayload.CODEC);
-        PayloadTypeRegistry.playS2C().register(HandshakePayload.TYPE, HandshakePayload.CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(HandshakePayload.TYPE, HandshakePayload.CODEC);
+        PayloadTypeRegistry.clientboundPlay().register(HandshakePayload.TYPE, HandshakePayload.CODEC);
         
-        PayloadTypeRegistry.playS2C().register(LODDataPayload.TYPE, LODDataPayload.CODEC);
+        PayloadTypeRegistry.clientboundPlay().register(LODDataPayload.TYPE, LODDataPayload.CODEC);
+        PayloadTypeRegistry.clientboundPlay().register(LODDataV2Payload.TYPE, LODDataV2Payload.CODEC);
         
         VoxyWorldGenV2.LOGGER.info("voxy networking initialized");
+    }
+
+    private static byte[] compressBytes(byte[] input) {
+        if (input == null || input.length == 0) return input;
+        if (input.length < COMPRESS_MIN_SIZE) return input;
+
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+             DeflaterOutputStream dos = new DeflaterOutputStream(baos, new Deflater(Deflater.BEST_SPEED))) {
+            dos.write(input);
+            dos.finish();
+            return baos.toByteArray();
+        } catch (IOException e) {
+            return input;
+        }
+    }
+
+    private static byte[] decompressBytes(byte[] compressed, int expectedLength) throws IOException {
+        if (compressed == null) return null;
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(compressed);
+             InflaterInputStream iis = new InflaterInputStream(bais);
+             ByteArrayOutputStream baos = new ByteArrayOutputStream(Math.max(1024, expectedLength))) {
+            byte[] buffer = new byte[1024];
+            int read;
+            while ((read = iis.read(buffer)) != -1) {
+                baos.write(buffer, 0, read);
+            }
+            return baos.toByteArray();
+        }
+    }
+
+    private static void writeCompressedFlaggedBytes(RegistryFriendlyByteBuf buf, byte[] data) {
+        if (data == null) {
+            buf.writeBoolean(false);
+            return;
+        }
+
+        if (data.length < COMPRESS_MIN_SIZE) {
+            buf.writeBoolean(false);
+            buf.writeByteArray(data);
+            return;
+        }
+
+        byte[] compressed = compressBytes(data);
+        if (compressed != null && compressed.length < data.length) {
+            buf.writeBoolean(true);
+            buf.writeInt(data.length);
+            buf.writeByteArray(compressed);
+        } else {
+            buf.writeBoolean(false);
+            buf.writeByteArray(data);
+        }
+    }
+
+    private static byte[] readCompressedFlaggedBytes(RegistryFriendlyByteBuf buf) {
+        boolean compressed = buf.readBoolean();
+        if (compressed) {
+            int origLen = buf.readInt();
+            byte[] comp = buf.readByteArray();
+            try {
+                return decompressBytes(comp, origLen);
+            } catch (IOException e) {
+                return comp;
+            }
+        } else {
+            return buf.readByteArray();
+        }
     }
 
     private static void setSyncedState(ServerPlayer player, ChunkPos pos, boolean isSynced) {
         var synced = PlayerTracker.getInstance().getSyncedChunks(player.getUUID());
         if (synced != null) {
             if (isSynced) {
-                synced.add(pos.toLong());
+                synced.add(pos.pack());
             } else {
-                synced.remove(pos.toLong());
+                synced.remove(pos.pack());
             }
         }
     }
@@ -118,12 +244,9 @@ public class NetworkHandler {
     public static void broadcastLODData(LevelChunk chunk) {
         ChunkPos pos = chunk.getPos();
         int minY = chunk.getMinSectionY();
-        List<LODDataPayload.SectionData> sections = buildSections(chunk);
-
-        if (sections.isEmpty()) return;
-
         double maxDistSq = 4096.0 * 4096.0;
 
+        List<ServerPlayer> recipients = new ArrayList<>();
         for (ServerPlayer player : PlayerTracker.getInstance().getPlayers()) {
             double dx = player.getX() - (pos.getMiddleBlockX());
             double dz = player.getZ() - (pos.getMiddleBlockZ());
@@ -133,6 +256,21 @@ public class NetworkHandler {
                 continue;
             }
 
+            var synced = PlayerTracker.getInstance().getSyncedChunks(player.getUUID());
+            if (synced != null && synced.contains(pos.pack())) {
+                // player already has this chunk's LOD data
+                continue;
+            }
+
+            recipients.add(player);
+        }
+
+        if (recipients.isEmpty()) return;
+
+        List<LODDataPayload.SectionData> sections = buildSections(chunk);
+        if (sections.isEmpty()) return;
+
+        for (ServerPlayer player : recipients) {
             sendSectionsInBatches(player, chunk.getLevel().dimension(), pos, minY, sections);
         }
     }
@@ -140,6 +278,9 @@ public class NetworkHandler {
     public static void sendLODData(ServerPlayer player, LevelChunk chunk) {
         ChunkPos pos = chunk.getPos();
         int minY = chunk.getMinSectionY();
+        var synced = PlayerTracker.getInstance().getSyncedChunks(player.getUUID());
+        if (synced != null && synced.contains(pos.pack())) return; // already synced
+
         List<LODDataPayload.SectionData> sections = buildSections(chunk);
 
         if (sections.isEmpty()) {
@@ -148,7 +289,6 @@ public class NetworkHandler {
         }
 
         sendSectionsInBatches(player, chunk.getLevel().dimension(), pos, minY, sections);
-        setSyncedState(player, pos, true);
     }
 
     private static List<LODDataPayload.SectionData> buildSections(LevelChunk chunk) {
@@ -198,6 +338,7 @@ public class NetworkHandler {
     private static void sendSectionsInBatches(ServerPlayer player, ResourceKey<Level> dimension, ChunkPos pos, int minY, List<LODDataPayload.SectionData> sections) {
         List<LODDataPayload.SectionData> batch = new ArrayList<>();
         int batchBytes = 0;
+        boolean sentAny = false;
 
         for (LODDataPayload.SectionData sd : sections) {
             int sectionBytes = sd.states().length + sd.biomes().length
@@ -206,6 +347,7 @@ public class NetworkHandler {
 
             if (!batch.isEmpty() && batchBytes + sectionBytes > MAX_PACKET_BYTES) {
                 ServerPlayNetworking.send(player, new LODDataPayload(dimension, pos, minY, batch));
+                sentAny = true;
                 batch = new ArrayList<>();
                 batchBytes = 0;
             }
@@ -216,6 +358,11 @@ public class NetworkHandler {
 
         if (!batch.isEmpty()) {
             ServerPlayNetworking.send(player, new LODDataPayload(dimension, pos, minY, batch));
+            sentAny = true;
+        }
+
+        if (sentAny) {
+            setSyncedState(player, pos, true);
         }
     }
 

@@ -40,7 +40,7 @@ public class DistanceGraph {
 
         int rx = bx >> ROOT_SIZE_SHIFT;
         int rz = bz >> ROOT_SIZE_SHIFT;
-        long rootKey = ChunkPos.asLong(rx, rz);
+        long rootKey = ChunkPos.pack(rx, rz);
 
         Node root = roots.computeIfAbsent(rootKey, k -> new Node(3, rx, rz));
         recursiveMark(root, bx, bz, bit);
@@ -78,8 +78,8 @@ public class DistanceGraph {
     }
 
     public List<ChunkPos> findWork(ChunkPos center, int radiusChunks, Set<Long> trackedBatches) {
-        int cbx = center.x >> BATCH_SIZE_SHIFT;
-        int cbz = center.z >> BATCH_SIZE_SHIFT;
+        int cbx = center.x() >> BATCH_SIZE_SHIFT;
+        int cbz = center.z() >> BATCH_SIZE_SHIFT;
         int rb = (radiusChunks + 3) >> BATCH_SIZE_SHIFT;
 
         PriorityQueue<WorkItem> queue = new PriorityQueue<>(Comparator.comparingDouble(i -> i.distSq));
@@ -92,7 +92,7 @@ public class DistanceGraph {
 
         for (int rx = rbxMin; rx <= rbxMax; rx++) {
             for (int rz = rbzMin; rz <= rbzMax; rz++) {
-                Node root = roots.get(ChunkPos.asLong(rx, rz));
+                Node root = roots.get(ChunkPos.pack(rx, rz));
                 // check empty space even if node is null
                 double dSq = getDistSq(rx, rz, rootSize, cbx, cbz);
                 if (dSq <= (double)rb * rb) {
@@ -107,7 +107,7 @@ public class DistanceGraph {
 
             if (item.level == 0) {
                 // found a batch
-                long key = ChunkPos.asLong(item.x, item.z);
+                long key = ChunkPos.pack(item.x, item.z);
                 if (trackedBatches.add(key)) {
                     List<ChunkPos> batch = new ArrayList<>(16);
                     for (int lz = 0; lz < 4; lz++) {
@@ -155,8 +155,8 @@ public class DistanceGraph {
     }
 
     public int countMissingInRange(ChunkPos center, int radiusChunks) {
-        int cbx = center.x >> BATCH_SIZE_SHIFT;
-        int cbz = center.z >> BATCH_SIZE_SHIFT;
+        int cbx = center.x() >> BATCH_SIZE_SHIFT;
+        int cbz = center.z() >> BATCH_SIZE_SHIFT;
         int rb = (radiusChunks + 3) >> BATCH_SIZE_SHIFT;
 
         int rootSize = 1 << ROOT_SIZE_SHIFT;
@@ -168,7 +168,7 @@ public class DistanceGraph {
         int count = 0;
         for (int rx = rbxMin; rx <= rbxMax; rx++) {
             for (int rz = rbzMin; rz <= rbzMax; rz++) {
-                Node root = roots.get(ChunkPos.asLong(rx, rz));
+                Node root = roots.get(ChunkPos.pack(rx, rz));
                 count += recursiveCount(root, 3, rx, rz, cbx, cbz, rb);
             }
         }
@@ -176,8 +176,8 @@ public class DistanceGraph {
     }
 
     public void collectCompletedInRange(ChunkPos center, int radiusChunks, it.unimi.dsi.fastutil.longs.LongSet alreadySynced, List<ChunkPos> out, int maxResults) {
-        int cbx = center.x >> BATCH_SIZE_SHIFT;
-        int cbz = center.z >> BATCH_SIZE_SHIFT;
+        int cbx = center.x() >> BATCH_SIZE_SHIFT;
+        int cbz = center.z() >> BATCH_SIZE_SHIFT;
         int rb = (radiusChunks + 3) >> BATCH_SIZE_SHIFT;
 
         // use a priority queue to process chunks from nearest to farthest
@@ -193,7 +193,7 @@ public class DistanceGraph {
 
         for (int rx = rbxMin; rx <= rbxMax; rx++) {
             for (int rz = rbzMin; rz <= rbzMax; rz++) {
-                Node root = roots.get(ChunkPos.asLong(rx, rz));
+                Node root = roots.get(ChunkPos.pack(rx, rz));
                 if (root == null) continue;
                 
                 double dSq = getDistSq(rx, rz, rootSize, cbx, cbz);
@@ -214,7 +214,7 @@ public class DistanceGraph {
                         int lx = i & 3;
                         int lz = i >> 2;
                         ChunkPos pos = new ChunkPos((item.x << 2) + lx, (item.z << 2) + lz);
-                        if (!alreadySynced.contains(pos.toLong())) {
+                        if (!alreadySynced.contains(pos.pack())) {
                             out.add(pos);
                             if (out.size() >= maxResults) return;
                         }
@@ -325,6 +325,6 @@ public class DistanceGraph {
     }
 
     public static long getBatchKey(int cx, int cz) {
-        return ChunkPos.asLong(cx >> 2, cz >> 2);
+        return ChunkPos.pack(cx >> 2, cz >> 2);
     }
 }

@@ -128,7 +128,7 @@ public final class TellusIntegration {
             
             Map<Integer, Holder<Biome>> biomeIdToHolder = new HashMap<>();
             Map<Holder<Biome>, Integer> biomeHolderToId = new IdentityHashMap<>();
-            Random random = new Random(pos.toLong());
+            Random random = new Random(pos.pack());
 
             int grassId_Voxy = VoxyIngester.getBlockId(mapper, Blocks.GRASS_BLOCK);
             int sandId_Voxy = VoxyIngester.getBlockId(mapper, Blocks.SAND);
@@ -280,7 +280,7 @@ public final class TellusIntegration {
                 int bY = sY << 4;
                 if (bY > maxHV + 16) continue;
 
-                Object vs = VoxyIngester.createSection(pos.x, sY, pos.z);
+                Object vs = VoxyIngester.createSection(pos.x(), sY, pos.z());
                 long[] dataArray = VoxyIngester.getSectionData(vs);
                 if (dataArray == null) continue;
                 Arrays.fill(dataArray, brightAir);

@@ -38,7 +38,7 @@ public final class ServerEventHandler {
         ChunkGenerationManager.getInstance().tick();
     }
 
-    public static void onChunkLoad(ServerLevel level, LevelChunk chunk) {
+    public static void onChunkLoad(ServerLevel level, LevelChunk chunk, boolean newlyGenerated) {
         // re-ingest the freshly-loaded chunk so Voxy receives biome data with correct
         // neighbor context (fixes hard snow/biome blend edges on new worlds, issue #40).
         // also handles syncing pre-generated chunks that couldn't be sent at generation

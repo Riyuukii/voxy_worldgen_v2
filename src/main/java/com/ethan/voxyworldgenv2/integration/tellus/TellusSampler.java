@@ -135,7 +135,7 @@ public final class TellusSampler {
         if (!isTellusPresent()) return;
         try {
             Object generator = level.getChunkSource().getGenerator();
-            earthChunkGeneratorClass.getMethod("prefetchForChunk", int.class, int.class).invoke(generator, pos.x, pos.z);
+            earthChunkGeneratorClass.getMethod("prefetchForChunk", int.class, int.class).invoke(generator, pos.x(), pos.z());
         } catch (Throwable ignored) {}
     }
 
@@ -167,7 +167,7 @@ public final class TellusSampler {
             int minBlockX = pos.getMinBlockX();
             int minBlockZ = pos.getMinBlockZ();
 
-            Object waterData = resolveChunkWaterDataMethod.invoke(waterResolver, pos.x, pos.z);
+            Object waterData = resolveChunkWaterDataMethod.invoke(waterResolver, pos.x(), pos.z());
 
             for (int i = 0; i < 256; i++) {
                 int z = i >> 4;

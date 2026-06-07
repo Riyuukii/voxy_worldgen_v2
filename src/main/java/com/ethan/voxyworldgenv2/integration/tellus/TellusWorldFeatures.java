@@ -19,7 +19,7 @@ import java.util.*;
 public final class TellusWorldFeatures {
 
     public static void placeVegetation(ChunkPos pos, TellusSampler.TellusChunkData data, Object mapper, Map<BlockPos, Long> blocks, int[] biomeIds, boolean[] vegAllowed) {
-        Random random = new Random(pos.toLong() ^ 0x67726173);
+        Random random = new Random(pos.pack() ^ 0x67726173);
         int minX = pos.getMinBlockX();
         int minZ = pos.getMinBlockZ();
         int[] heights = data.heights();
@@ -55,7 +55,7 @@ public final class TellusWorldFeatures {
     }
 
     public static void placeUnderwaterVegetation(ChunkPos pos, TellusSampler.TellusChunkData data, Object mapper, Map<BlockPos, Long> blocks, int[] biomeIds, boolean[] hasWaters) {
-        Random random = new Random(pos.toLong() ^ 0x73656167);
+        Random random = new Random(pos.pack() ^ 0x73656167);
         int minX = pos.getMinBlockX();
         int minZ = pos.getMinBlockZ();
         int[] heights = data.heights();

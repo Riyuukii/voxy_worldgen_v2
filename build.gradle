@@ -1,5 +1,5 @@
 plugins {
-    id 'fabric-loom' version '1.14.10'
+    id 'net.fabricmc.fabric-loom' version "${loom_version}"
     id 'maven-publish'
 }
 
@@ -10,6 +10,17 @@ base {
     archivesName = "${mod_name}-${minecraft_version}"
 }
 
+loom {
+    splitEnvironmentSourceSets()
+
+    mods {
+        "voxyworldgenv2" {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+}
+
 repositories {
     mavenCentral()
     maven { url 'https://maven.shedaniel.me/' }
@@ -18,37 +29,36 @@ repositories {
 
 dependencies {
     minecraft "com.mojang:minecraft:${minecraft_version}"
-    mappings loom.officialMojangMappings()
-    modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
-    modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
+    implementation "net.fabricmc:fabric-loader:${loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${fabric_api_version}"
 
-    modApi("me.shedaniel.cloth:cloth-config-fabric:${cloth_config_version}") {
+    implementation("me.shedaniel.cloth:cloth-config-fabric:${cloth_config_version}") {
         exclude(group: "net.fabricmc.fabric-api")
     }
-    modImplementation "com.terraformersmc:modmenu:${mod_menu_version}"
+    implementation "com.terraformersmc:modmenu:${mod_menu_version}"
 }
 
 processResources {
     inputs.property "version", project.version
     inputs.property "minecraft_version", project.minecraft_version
-    inputs.property "loader_version", project.fabric_loader_version
+    inputs.property "loader_version", project.loader_version
 
     filesMatching("fabric.mod.json") {
         expand "version": project.version,
                 "minecraft_version": project.minecraft_version,
-                "loader_version": project.fabric_loader_version
+                "loader_version": project.loader_version
     }
 }
 
 tasks.withType(JavaCompile).configureEach {
     it.options.encoding = "UTF-8"
-    it.options.release = 21
+    it.options.release = 25
 }
 
 java {
     withSourcesJar()
-    sourceCompatibility = 21
-    targetCompatibility = 21
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
 }
 
 jar {

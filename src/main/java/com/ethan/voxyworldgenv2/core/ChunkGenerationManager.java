@@ -211,13 +211,13 @@ public final class ChunkGenerationManager {
                             // mark all as synced now so we don't retry unloaded chunks in a tight loop;
                             // the block update mixin will re-sync them when they load naturally
                             for (ChunkPos syncPos : finalSyncBatch) {
-                                synced.add(syncPos.toLong());
+                                synced.add(syncPos.pack());
                             }
                             server.execute(() -> {
                                 ServerPlayer p = server.getPlayerList().getPlayer(playerUUID);
                                 if (p != null) {
                                     for (ChunkPos syncPos : finalSyncBatch) {
-                                        LevelChunk c = level.getChunkSource().getChunk(syncPos.x, syncPos.z, false);
+                                        LevelChunk c = level.getChunkSource().getChunk(syncPos.x(), syncPos.z(), false);
                                         if (c != null) {
                                             com.ethan.voxyworldgenv2.network.NetworkHandler.sendLODData(p, c);
                                         }
@@ -240,13 +240,13 @@ public final class ChunkGenerationManager {
                 }
                 
                 final DimensionState finalState = activeState;
-                long batchKey = DistanceGraph.getBatchKey(batch.get(0).x, batch.get(0).z);
+                long batchKey = DistanceGraph.getBatchKey(batch.get(0).x(), batch.get(0).z());
                 finalState.batchCounters.put(batchKey, new AtomicInteger(batch.size()));
 
                 // skip if already tracked locally
                 List<ChunkPos> preFiltered = new ArrayList<>(batch.size());
                 for (ChunkPos pos : batch) {
-                    long key = pos.toLong();
+                    long key = pos.pack();
                     if (finalState.completedChunks.contains(key) || finalState.trackedChunks.contains(key)) {
                         onSuccess(finalState, pos);
                     } else {
@@ -277,7 +277,7 @@ public final class ChunkGenerationManager {
                     if (!acquired) break;
                     
                     processedCount++;
-                    if (finalState.trackedChunks.add(pos.toLong())) {
+                    if (finalState.trackedChunks.add(pos.pack())) {
                         activeTaskCount.incrementAndGet();
                         stats.incrementQueued();
                         
@@ -307,8 +307,8 @@ public final class ChunkGenerationManager {
                         List<ChunkPos> actuallyGenerate = new ArrayList<>();
                         
                         for (ChunkPos pos : readyToGenerate) {
-                            if (finalState.level.hasChunk(pos.x, pos.z)) {
-                                LevelChunk existingChunk = finalState.level.getChunk(pos.x, pos.z);
+                            if (finalState.level.hasChunk(pos.x(), pos.z())) {
+                                LevelChunk existingChunk = finalState.level.getChunk(pos.x(), pos.z());
                                 if (existingChunk != null && !existingChunk.isEmpty()) {
                                     VoxyIntegration.ingestChunk(existingChunk);
                                     com.ethan.voxyworldgenv2.network.NetworkHandler.broadcastLODData(existingChunk);
@@ -326,7 +326,7 @@ public final class ChunkGenerationManager {
                             processPendingTickets();
 
                             for (ChunkPos pos : actuallyGenerate) {
-                                ((ServerChunkCacheMixin) cache).invokeGetChunkFutureMainThread(pos.x, pos.z, ChunkStatus.FULL, true)
+                                ((ServerChunkCacheMixin) cache).invokeGetChunkFutureMainThread(pos.x(), pos.z(), ChunkStatus.FULL, true)
                                     .whenCompleteAsync((result, throwable) -> {
                                         if (throwable == null && result != null && result.isSuccess() && result.orElse(null) instanceof LevelChunk chunk) {
                                             onSuccess(finalState, pos);
@@ -432,8 +432,8 @@ public final class ChunkGenerationManager {
     }
 
     private double distSq(ChunkPos a, ChunkPos b) {
-        int dx = a.x - b.x;
-        int dz = a.z - b.z;
+        int dx = a.x() - b.x();
+        int dz = a.z() - b.z();
         return (double) dx * dx + dz * dz;
     }
 
@@ -522,14 +522,14 @@ public final class ChunkGenerationManager {
     }
 
     private void onSuccess(DimensionState state, ChunkPos pos) {
-        long key = pos.toLong();
+        long key = pos.pack();
         if (state.completedChunks.add(key)) {
             stats.incrementCompleted();
-            state.distanceGraph.markChunkCompleted(pos.x, pos.z);
+            state.distanceGraph.markChunkCompleted(pos.x(), pos.z());
             state.remainingInRadius.decrementAndGet();
         } else {
             stats.incrementSkipped();
-            state.distanceGraph.markChunkCompleted(pos.x, pos.z);
+            state.distanceGraph.markChunkCompleted(pos.x(), pos.z());
         }
         decrementBatch(state, pos);
     }
@@ -541,7 +541,7 @@ public final class ChunkGenerationManager {
     }
 
     private void decrementBatch(DimensionState state, ChunkPos pos) {
-        long batchKey = DistanceGraph.getBatchKey(pos.x, pos.z);
+        long batchKey = DistanceGraph.getBatchKey(pos.x(), pos.z());
         AtomicInteger counter = state.batchCounters.get(batchKey);
         if (counter != null && counter.decrementAndGet() <= 0) {
             state.trackedBatches.remove(batchKey);
@@ -550,7 +550,7 @@ public final class ChunkGenerationManager {
     }
     
     private void completeTask(DimensionState state, ChunkPos pos) {
-        if (state.trackedChunks.remove(pos.toLong())) {
+        if (state.trackedChunks.remove(pos.pack())) {
             activeTaskCount.decrementAndGet();
             throttle.release();
         }
@@ -562,7 +562,7 @@ public final class ChunkGenerationManager {
     
     public boolean isChunkCompleted(net.minecraft.server.level.ServerLevel level, net.minecraft.world.level.ChunkPos pos) {
         DimensionState state = dimensionStates.get(level.dimension());
-        return state != null && state.completedChunks.contains(pos.toLong());
+        return state != null && state.completedChunks.contains(pos.pack());
     }
 
     public GenerationStats getStats() { return stats; }

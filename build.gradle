@@ -36,6 +36,8 @@ dependencies {
         exclude(group: "net.fabricmc.fabric-api")
     }
     implementation "com.terraformersmc:modmenu:${mod_menu_version}"
+    // high-speed compression for optimized LOD payloads
+    implementation "org.lz4:lz4-java:1.8.0"
 }
 
 processResources {

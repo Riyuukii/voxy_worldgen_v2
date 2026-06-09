@@ -101,6 +101,13 @@ public class NetworkHandler {
         
         PayloadTypeRegistry.clientboundPlay().register(LODDataPayload.TYPE, LODDataPayload.CODEC);
         
+        // Listen for the client's handshake request and reply instantly
+        ServerPlayNetworking.registerGlobalReceiver(HandshakePayload.TYPE, (payload, context) -> {
+            context.server().execute(() -> {
+                sendHandshake(context.player());
+            });
+        });
+        
         VoxyWorldGenV2.LOGGER.info("voxy networking initialized");
     }
 
@@ -118,13 +125,16 @@ public class NetworkHandler {
     public static void broadcastLODData(LevelChunk chunk) {
         ChunkPos pos = chunk.getPos();
         int minY = chunk.getMinSectionY();
-        List<LODDataPayload.SectionData> sections = buildSections(chunk);
-
-        if (sections.isEmpty()) return;
+        List<LODDataPayload.SectionData> sections = null; // Lazy compiled to save performance if no modded clients nearby
 
         double maxDistSq = 4096.0 * 4096.0;
 
         for (ServerPlayer player : PlayerTracker.getInstance().getPlayers()) {
+            // Fix: If the client can't process LOD packets, skip them immediately!
+            if (!ServerPlayNetworking.canSend(player, LODDataPayload.TYPE)) {
+                continue;
+            }
+
             double dx = player.getX() - (pos.getMiddleBlockX());
             double dz = player.getZ() - (pos.getMiddleBlockZ());
 
@@ -133,11 +143,21 @@ public class NetworkHandler {
                 continue;
             }
 
+            if (sections == null) {
+                sections = buildSections(chunk);
+                if (sections.isEmpty()) return;
+            }
+
             sendSectionsInBatches(player, chunk.getLevel().dimension(), pos, minY, sections);
         }
     }
 
     public static void sendLODData(ServerPlayer player, LevelChunk chunk) {
+        // Fix: Explicitly protect direct synchronization calls against vanilla players
+        if (!ServerPlayNetworking.canSend(player, LODDataPayload.TYPE)) {
+            return;
+        }
+
         ChunkPos pos = chunk.getPos();
         int minY = chunk.getMinSectionY();
         List<LODDataPayload.SectionData> sections = buildSections(chunk);

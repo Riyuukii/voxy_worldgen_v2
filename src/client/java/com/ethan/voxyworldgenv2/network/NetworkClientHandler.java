@@ -2,6 +2,7 @@ package com.ethan.voxyworldgenv2.network;
 
 import com.ethan.voxyworldgenv2.VoxyWorldGenV2;
 import com.ethan.voxyworldgenv2.integration.VoxyIntegration;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -16,6 +17,12 @@ import net.minecraft.core.Holder;
 public class NetworkClientHandler {
     
     public static void init() {
+        // Reset state on join and safely initiate the handshake from the client side
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+            NetworkState.setServerConnected(false);
+            ClientPlayNetworking.send(new NetworkHandler.HandshakePayload(false));
+        });
+
         ClientPlayNetworking.registerGlobalReceiver(NetworkHandler.HandshakePayload.TYPE, (payload, context) -> {
             boolean serverHasMod = payload.serverHasMod();
             context.client().execute(() -> {
